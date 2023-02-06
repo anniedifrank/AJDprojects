@@ -1,0 +1,150 @@
+---
+title: "Machine Learning Final Project"
+author: "AJD"
+date: '2023-02-02'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Executive Summary
+
+The goal of this project is to predict the manner in which 6 participants that regularly use fitness collection devices did barbell lifts; correctly or incorrectly. The outcome variable of interest is 'classe'. We want to use data from accelerometers on the belt, forearm, arm, and dumbell. 
+To determine the best model to predict this variable with, we will try four methods; decision trees, random forests, boosting, and support vector machines. We will also test a combination of all models. 
+
+This analysis determine that Random Forests was the best prediction model with 99% accuracy and around a 1% out of sample error.
+
+
+## Exploratory Data Analysis
+```{r}
+read.csv("/Users/difrankaj/Desktop/pml-testing.csv") ->testing
+read.csv("/Users/difrankaj/Desktop/pml-training.csv") ->training
+library("caret")
+library(rattle)
+
+dim(training)
+# THere are 160 variables. There are 20 observations in the test set and 19,622 in the training set. 
+```
+
+## Data Munging
+There are many NA values in the data set- we first want to remove these. Then, we will look for near-zero variance variables and remove those as well. 
+
+```{r}
+#Showing NA values
+sum(is.na(training))
+#Over one million NA values!
+
+#Removing columns that are majorily NA values
+condition <- (colSums(is.na(training)) == 0)
+training <- training[, condition]
+testing <- testing[, condition]
+sum(is.na(training))
+#This removed all NAs. We now have 93 variables to work with.
+
+#Removing the first 7 columns that are not relevant predictors- irrelevant to the outcome. Now, 86 variables.
+training <- training[, -c(1:7)]
+testing <- testing[, -c(1:7)]
+```
+
+Removing near-zero variance variables
+```{r}
+near <- nearZeroVar(training)
+training <- training[, -near]
+testing <- testing[, -near]
+#We now have 53 variables. 
+```
+
+In order to perform cross validation, we will subset the training dataset into training and an addition validation dataset. 
+
+```{r}
+#Create data partition using the caret package
+inTrain <- createDataPartition(y = training$classe, p = 0.7, list = FALSE)
+train <- training[inTrain, ]
+validation <- training[-inTrain, ]
+```
+
+## Creating and Testing Models 
+
+Control for cross validation
+```{r}
+control <- trainControl(method="cv", number=5, verboseIter=FALSE)
+```
+
+#### Model 1: Decision Trees
+ Basic Idea: Split variables into groups based on a decision split, evaluate the homogeneity within each group, split again if necessary. 
+```{r}
+dectrees<- train(classe~., method= "rpart", trControl = control, data=train)
+#Visual: 
+fancyRpartPlot(dectrees$finalModel)
+```
+
+Testing prediction
+```{r}
+DTpred<- predict(dectrees, validation)
+confusionMatrix(DTpred, factor(validation$classe))
+```
+This model is approximately 50% accurate, which means it is no better than a random guess. The out of sample error is then around 0.50.
+
+##### Model 2: Random Forests
+ Basic Idea: Take bootsrapped sample, at each tree split build boostrapped variables in each sample, hence growing multiple trees, then vote/average these trees to create best prediction model. 
+```{r}
+rf<- train(classe~., method="rf", trControl= control, data=train)
+```
+
+Testing prediction
+```{r}
+RFpred<- predict(rf, validation)
+confusionMatrix(RFpred, factor(validation$classe))
+```
+This model is approximately 99% accurate! The out of sample error is then around 0.01.
+
+#### Model 3: Gradient Boosted Trees 
+  Basic Idea: Resample the data several times, recalculated predictions based on the previous sample, and after the resampling, average/majority vote the results for a final prediction model.
+```{r, echo= FALSE}
+boost<- train(classe~., method= "gbm", trControl=control, data=train)
+```
+
+Testing prediction
+```{r}
+boostpred<- predict(boost, validation)
+confusionMatrix(boostpred, factor(validation$classe))
+```
+This model is approximately 96% accurate!The out of sample error is then around 0.04.
+
+#### Model 4: Support Vector Machine
+  Basic Idea: Maximize the margin of the classifier by use of support vectors; mapping data to a high-dimensional feature space so that data points can be categorized. 
+```{r}
+svm<- train(classe~., method="svmLinear", trControl=control, data=train)
+```
+
+Testing prediction 
+```{r}
+svmpred<- predict(svm, validation)
+confusionMatrix(svmpred, factor(validation$classe))
+
+```
+This model is approximately 79% accurate. The out of sample error is then around 0.21.
+
+#### Model 5: Combining predictors by averaging
+Because the first model tested, decision trees, did not perform better than an average guess, we will only try to combine models 2-4. 
+
+Method: Model stacking
+```{r}
+#First, combine the predictions from models 2-4 into one dataframe
+combdf<- data.frame(RFpred, boostpred, svmpred, classe=validation$classe)
+combFit<- train(classe~., method= "gam", data=combdf)
+
+#Checking accuracy:
+combpred<- predict(combFit, validation)
+confusionMatrix(combpred, factor(validation$classe))
+```
+This model is extremely innacurate at approximately 48%. 
+
+The best model is random forests, with 99% accuracy. Now we will predict the classe (5 levels) on the test set. 
+```{r} 
+plot(rf)
+testpred<- predict(rf, testing)
+testpred
+```
